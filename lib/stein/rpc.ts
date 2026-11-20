@@ -18,11 +18,6 @@ export const NETWORKS: Network[] = [
     endpoints: ['https://rpc.steinchain.com', 'https://stein-follower.nick-598.workers.dev'],
     explorer: 'https://steinscan.io',
   },
-  {
-    key: 'local',
-    label: 'Local node (127.0.0.1:8645)',
-    endpoints: ['http://127.0.0.1:8645'],
-  },
 ];
 
 export interface Status {

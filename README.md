@@ -62,8 +62,8 @@ bytes from `crypto.getRandomValues`, passed in by `core.mjs`.
   command-line wallet.
 - **Seed files are interchangeable** with the command-line wallet:
   `fn-dsa-512-draft:<64 hex characters>`. The backup this app downloads is one.
-- **Networks** are listed in `lib/stein/rpc.ts`: the devnet (validator, then
-  the follower) and a local node.
+- **Networks** are listed in `lib/stein/rpc.ts`: the devnet, read from the
+  validator and, if that is unreachable, the follower.
 
 ## Commands
 
