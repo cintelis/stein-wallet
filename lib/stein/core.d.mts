@@ -27,6 +27,20 @@ export interface SignedTransfer {
   raw: Uint8Array;
 }
 
+export interface Statement {
+  /** The 32-byte key seed. */
+  seed: Uint8Array;
+  /** What kind of statement: the asking site defines the kinds. */
+  kind: number;
+  payload: Uint8Array;
+}
+
+export interface SignedStatement {
+  /** The account's FN-DSA-512 public key. */
+  publicKey: Uint8Array;
+  signature: Uint8Array;
+}
+
 export interface Core {
   /** The address, in text form, of the key derived from a seed. */
   addressFromSeed(seed: Uint8Array): string;
@@ -34,6 +48,19 @@ export interface Core {
   /** Parses an address, checking its checksum. Throws with a readable message. */
   decodeAddress(text: string): Uint8Array;
   signTransfer(request: TransferRequest): SignedTransfer;
+  /** Signs a statement: proof to a site, never a transaction. */
+  signStatement(statement: Statement): SignedStatement;
+  verifyStatement(signed: {
+    publicKey: Uint8Array;
+    kind: number;
+    payload: Uint8Array;
+    signature: Uint8Array;
+  }): boolean;
+  /** The address, in text form, that a public key controls. */
+  addressFromPublicKey(publicKey: Uint8Array): string;
 }
 
-export function loadCore(source: Response | BufferSource): Promise<Core>;
+export const PUBLIC_KEY_LEN: number;
+export const SIGNATURE_LEN: number;
+
+export function loadCore(source: Response | BufferSource | WebAssembly.Module): Promise<Core>;

@@ -108,3 +108,38 @@ test("a transfer of zero is refused", () => {
     /zero/,
   );
 });
+
+test("a statement verifies only as what was signed, by who signed it", () => {
+  const payload = new TextEncoder().encode("a statement, not a transaction");
+  const { publicKey, signature } = core.signStatement({ seed: seed(0x07), kind: 2, payload });
+  assert.equal(publicKey.length, 897);
+  assert.equal(signature.length, 666);
+  // The public key is the account's: it hashes to the chain's address.
+  assert.equal(core.addressFromPublicKey(publicKey), VECTORS[0][1]);
+
+  const check = (changes) => core.verifyStatement({ publicKey, kind: 2, payload, signature, ...changes });
+  assert.equal(check({}), true);
+  assert.equal(check({ kind: 1 }), false);
+  assert.equal(check({ payload: new TextEncoder().encode("a statement, not a transaction!") }), false);
+  const altered = signature.slice();
+  altered[100] ^= 1;
+  assert.equal(check({ signature: altered }), false);
+  const other = core.signStatement({ seed: seed(0x2a), kind: 2, payload });
+  assert.equal(check({ publicKey: other.publicKey }), false);
+  assert.equal(check({ signature: other.signature }), false);
+});
+
+test("a transfer's signature is not a statement's, nor the reverse", () => {
+  // A transfer is signed over "STEIN-SIG-v1" ‖ 1 ‖ body and a statement over
+  // "STEIN-STATEMENT-v1" ‖ kind ‖ payload: no body and payload make them equal.
+  const signed = core.signTransfer({
+    seed: seed(0x07), chainId: 31337n, nonce: 0n, expiresAt: 100n, minFeePerByte: 10n,
+    to: VECTORS[1][1], amount: 1n, registerKey: false,
+  });
+  const body = signed.raw.subarray(0, 122);
+  const signature = signed.raw.subarray(signed.raw.length - 666);
+  const { publicKey } = core.signStatement({ seed: seed(0x07), kind: 1, payload: body });
+  for (const kind of [0, 1, 2]) {
+    assert.equal(core.verifyStatement({ publicKey, kind, payload: body, signature }), false);
+  }
+});

@@ -16,7 +16,7 @@ import {
   useState,
 } from 'react';
 import { transferFee } from '@/lib/stein/amount';
-import { loadCore, type Core } from '@/lib/stein/core.mjs';
+import { loadCore, type Core, type SignedStatement } from '@/lib/stein/core.mjs';
 import {
   deleteVault,
   loadVault,
@@ -41,6 +41,7 @@ import {
   type Status,
   type TxView,
 } from '@/lib/stein/rpc';
+import { statementFor, type SignRequest } from '@/lib/stein/statement';
 
 const NETWORK_KEY = 'stein-wallet:network';
 const POLL_MS = 8_000;
@@ -83,6 +84,8 @@ interface WalletState {
   backupText: () => string;
   markBackedUp: () => void;
   send: (to: string, amount: bigint) => Promise<Sent>;
+  /** Signs what a site asked for: a statement, never a transaction. */
+  signStatement: (request: SignRequest) => SignedStatement;
   /** The most recent transfer sent in this session. */
   lastSent: Sent | null;
 }
@@ -278,6 +281,15 @@ export default function WalletProvider({ children }: { children: React.ReactNode
     [core, address, network, refresh],
   );
 
+  const signStatement = useCallback(
+    (request: SignRequest): SignedStatement => {
+      if (!core || !seed.current || !address) throw new Error('Unlock the wallet first.');
+      const statement = statementFor(request, core.decodeAddress(address));
+      return core.signStatement({ seed: seed.current, ...statement });
+    },
+    [core, address],
+  );
+
   // Follow the last transfer until a block includes it.
   useEffect(() => {
     if (!lastSent || lastSent.height !== null) return;
@@ -323,6 +335,7 @@ export default function WalletProvider({ children }: { children: React.ReactNode
       backupText,
       markBackedUp,
       send,
+      signStatement,
       lastSent,
     }),
     [
@@ -348,6 +361,7 @@ export default function WalletProvider({ children }: { children: React.ReactNode
       backupText,
       markBackedUp,
       send,
+      signStatement,
       lastSent,
     ],
   );

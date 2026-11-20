@@ -9,8 +9,8 @@
 use zeroize::Zeroize;
 
 use crate::{
-    address_from_text, address_to_text, sign_transfer, Error, Key, Transfer, ADDRESS_TEXT_LEN,
-    SEED_LEN,
+    address_from_text, address_of, address_to_text, sign_transfer, verify_statement, Error, Key,
+    Transfer, ADDRESS_TEXT_LEN, PUBLIC_KEY_LEN, SEED_LEN, SIGNATURE_LEN,
 };
 
 /// Length of the input to [`stein_transfer`].
@@ -184,4 +184,97 @@ pub unsafe extern "C" fn stein_transfer(input: *const u8, out: *mut u8, out_cap:
     out[32..48].copy_from_slice(&signed.fee.to_le_bytes());
     out[48..len].copy_from_slice(&signed.raw);
     len as i32
+}
+
+/// Signs a statement (see the crate documentation) with the key of a seed.
+///
+/// Output: `public_key[PUBLIC_KEY_LEN] ‖ signature[SIGNATURE_LEN]`. Returns
+/// its length.
+///
+/// # Safety
+/// `seed` and `randomness` must each point to 32 readable bytes, `payload` to
+/// `payload_len` readable bytes and `out` to `out_cap` writable bytes.
+#[no_mangle]
+pub unsafe extern "C" fn stein_statement_sign(
+    seed: *const u8,
+    randomness: *const u8,
+    kind: u8,
+    payload: *const u8,
+    payload_len: usize,
+    out: *mut u8,
+    out_cap: usize,
+) -> i32 {
+    // SAFETY: per the contract above.
+    let (seed, randomness, payload, out) = unsafe {
+        (
+            &*(seed as *const [u8; SEED_LEN]),
+            &*(randomness as *const [u8; 32]),
+            std::slice::from_raw_parts(payload, payload_len),
+            std::slice::from_raw_parts_mut(out, out_cap),
+        )
+    };
+    let len = PUBLIC_KEY_LEN + SIGNATURE_LEN;
+    if out.len() < len {
+        return TOO_SMALL;
+    }
+    let signed = Key::from_seed(seed).and_then(|mut key| {
+        let signature = key.sign_statement(kind, payload, randomness)?;
+        Ok((key.public_key().to_vec(), signature))
+    });
+    match signed {
+        Ok((public_key, signature)) => {
+            out[..PUBLIC_KEY_LEN].copy_from_slice(&public_key);
+            out[PUBLIC_KEY_LEN..len].copy_from_slice(&signature);
+            len as i32
+        }
+        Err(e) => code(e),
+    }
+}
+
+/// Checks a statement's signature: 1 if it is `public_key`'s signature of the
+/// statement, 0 if not.
+///
+/// # Safety
+/// `public_key` must point to [`PUBLIC_KEY_LEN`] readable bytes, `payload` to
+/// `payload_len` and `signature` to [`SIGNATURE_LEN`].
+#[no_mangle]
+pub unsafe extern "C" fn stein_statement_verify(
+    public_key: *const u8,
+    kind: u8,
+    payload: *const u8,
+    payload_len: usize,
+    signature: *const u8,
+) -> i32 {
+    // SAFETY: per the contract above.
+    let (public_key, payload, signature) = unsafe {
+        (
+            std::slice::from_raw_parts(public_key, PUBLIC_KEY_LEN),
+            std::slice::from_raw_parts(payload, payload_len),
+            std::slice::from_raw_parts(signature, SIGNATURE_LEN),
+        )
+    };
+    i32::from(verify_statement(public_key, kind, payload, signature))
+}
+
+/// Writes the 32-byte address an encoded public key controls.
+///
+/// # Safety
+/// `public_key` must point to [`PUBLIC_KEY_LEN`] readable bytes and `out` to
+/// 32 writable bytes.
+#[no_mangle]
+pub unsafe extern "C" fn stein_address_from_public_key(public_key: *const u8, out: *mut u8) -> i32 {
+    // SAFETY: per the contract above.
+    let (public_key, out) = unsafe {
+        (
+            std::slice::from_raw_parts(public_key, PUBLIC_KEY_LEN),
+            &mut *(out as *mut [u8; 32]),
+        )
+    };
+    match address_of(public_key) {
+        Ok(address) => {
+            *out = address;
+            0
+        }
+        Err(e) => code(e),
+    }
 }

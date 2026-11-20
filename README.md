@@ -55,6 +55,32 @@ It follows `stein-crypto` and `stein-types` in stein-chain.
 The WebAssembly module has no source of randomness. Each signature takes 32
 bytes from `crypto.getRandomValues`, passed in by `core.mjs`.
 
+## Signing for steinchain.com
+
+`/sign` signs a **statement** for steinchain.com: proof that the holder of
+this account asked for something, which is not a transaction. The site sends
+the visitor here with the request in the URL fragment; the page shows exactly
+what is asked, signs only on a click, and sends the visitor back with the
+public key and signature in the fragment (`lib/stein/statement.ts`). A
+fragment is never sent to a server.
+
+- **Register**: signs the account's own address, so the site can list it as
+  held.
+- **Message**: signs the site's inbox key and the message text, so the reader
+  of the message knows which account wrote it.
+
+The core signs a statement over `"STEIN-STATEMENT-v1" ‖ kind ‖ payload`. A
+transaction is signed over `"STEIN-SIG-v1" ‖ …`, so neither can stand in for
+the other: a statement moves nothing and cannot be replayed on the chain
+(`test/core.test.mjs` checks both directions). The answer always goes to
+steinchain.com, whatever the request says, so no other site can use this page
+to collect signatures.
+
+steinchain.com verifies statements with a build of this core
+(`public/stein_wallet_core.wasm`), vendored in the stein-chain repository
+under `website/vendor/stein-wallet-core/`. After changing the core's
+statement functions, copy the new build and `lib/stein/core.mjs` there.
+
 ## Scope
 
 - **FN-DSA accounts only.** ML-DSA signing runs on AWS-LC in stein-chain, which

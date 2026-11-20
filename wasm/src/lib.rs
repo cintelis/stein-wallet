@@ -2,13 +2,20 @@
 //!
 //! Everything a wallet must get byte-exact lives here, in Rust, and is
 //! compiled to WebAssembly: deriving a key from a seed, deriving and checking
-//! addresses, and encoding and signing a transfer. The formats are those of
+//! addresses, encoding and signing a transfer, and signing and verifying a
+//! statement (below). The formats are those of
 //! stein-chain (`stein-crypto`, `stein-types`); `tests/` holds vectors made by
 //! the chain's own wallet, so a drift from the chain fails the build.
 //!
 //! Scope: accounts on **FN-DSA-512 per the draft FIPS 206** (scheme tag 3,
 //! `fn-dsa-512-draft`). ML-DSA accounts need the chain's AWS-LC, which does
 //! not target the browser.
+//!
+//! A **statement** is a signature that is not a transaction: proof, to a web
+//! site, that the holder of an account wrote something. It is signed over
+//! `"STEIN-STATEMENT-v1" ‖ kind ‖ payload`, which no transaction's signed
+//! bytes can equal (those start `"STEIN-SIG-v1"`), so a statement can never
+//! be replayed as a transfer, nor a transfer as a statement.
 //!
 //! The module has no access to randomness of its own. The caller passes 32
 //! fresh random bytes with each signature (in a browser, from
@@ -18,7 +25,8 @@
 
 use fn_dsa::{
     sign_key_size, signature_size, vrfy_key_size, KeyPairGenerator, KeyPairGenerator512,
-    SigningKey as _, SigningKey512, DOMAIN_NONE, FN_DSA_LOGN_512, HASH_ID_RAW,
+    SigningKey as _, SigningKey512, VerifyingKey as _, VerifyingKey512, DOMAIN_NONE,
+    FN_DSA_LOGN_512, HASH_ID_RAW,
 };
 use rand_core::{CryptoRng, RngCore};
 use zeroize::Zeroize;
@@ -48,6 +56,9 @@ const TXID_CONTEXT: &str = "stein txid v1";
 /// into the randomness one signature consumes.
 const SIGNING_RANDOMNESS_CONTEXT: &str = "stein-wallet signing randomness v1";
 const SIGNING_PREFIX: &[u8; 12] = b"STEIN-SIG-v1";
+/// What a statement is signed under. Not a chain format: the chain never sees
+/// a statement. It must never be a prefix of, or prefixed by, `SIGNING_PREFIX`.
+const STATEMENT_PREFIX: &[u8; 18] = b"STEIN-STATEMENT-v1";
 const DOMAIN_TRANSACTION: u8 = 1;
 const TX_VERSION: u8 = 1;
 const ACTION_TRANSFER: u8 = 0;
@@ -150,6 +161,22 @@ impl Key {
         message.extend_from_slice(SIGNING_PREFIX);
         message.push(DOMAIN_TRANSACTION);
         message.extend_from_slice(body);
+        self.sign_message(&message, randomness)
+    }
+
+    /// Signs a statement of the given kind. `randomness` must be fresh for
+    /// every call. What a kind and its payload mean is up to the site that
+    /// asks for it; the wallet shows the user what they are signing.
+    pub fn sign_statement(
+        &mut self,
+        kind: u8,
+        payload: &[u8],
+        randomness: &[u8; 32],
+    ) -> Result<Vec<u8>, Error> {
+        self.sign_message(&statement_message(kind, payload), randomness)
+    }
+
+    fn sign_message(&mut self, message: &[u8], randomness: &[u8; 32]) -> Result<Vec<u8>, Error> {
         let mut rng = XofRng::new(SIGNING_RANDOMNESS_CONTEXT, randomness);
         let mut signature = vec![0u8; SIGNATURE_LEN];
         self.signing
@@ -157,12 +184,39 @@ impl Key {
                 &mut rng,
                 &DOMAIN_NONE,
                 &HASH_ID_RAW,
-                &message,
+                message,
                 &mut signature,
             )
             .ok_or(Error::Crypto)?;
         Ok(signature)
     }
+}
+
+fn statement_message(kind: u8, payload: &[u8]) -> Vec<u8> {
+    let mut message = Vec::with_capacity(STATEMENT_PREFIX.len() + 1 + payload.len());
+    message.extend_from_slice(STATEMENT_PREFIX);
+    message.push(kind);
+    message.extend_from_slice(payload);
+    message
+}
+
+/// The address an encoded public key controls, if it is a public key.
+pub fn address_of(public_key: &[u8]) -> Result<[u8; 32], Error> {
+    VerifyingKey512::decode(public_key).ok_or(Error::Crypto)?;
+    Ok(hash(ADDRESS_CONTEXT, &[&[SCHEME_TAG], public_key]))
+}
+
+/// Whether `signature` is `public_key`'s signature of the statement.
+pub fn verify_statement(public_key: &[u8], kind: u8, payload: &[u8], signature: &[u8]) -> bool {
+    let Some(key) = VerifyingKey512::decode(public_key) else {
+        return false;
+    };
+    key.verify(
+        signature,
+        &DOMAIN_NONE,
+        &HASH_ID_RAW,
+        &statement_message(kind, payload),
+    )
 }
 
 fn checksum(address: &[u8; 32]) -> [u8; 4] {
