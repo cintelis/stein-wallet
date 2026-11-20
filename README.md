@@ -83,3 +83,8 @@ static export in `./out` (see `wrangler.jsonc`). `public/_headers` sets the
 security headers: scripts from this origin only, and network requests only to
 the Stein nodes in `lib/stein/rpc.ts`. A new network endpoint must be added in
 both places.
+
+Pushing to `main` deploys: the *CI and deploy* workflow builds the core, runs
+the tests, deploys with the pinned `wrangler`, and then checks that the served
+core is the one it built. It needs the repository secret
+`CLOUDFLARE_API_TOKEN` and the variable `CLOUDFLARE_ACCOUNT_ID`.
