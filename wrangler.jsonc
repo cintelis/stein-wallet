@@ -1,0 +1,15 @@
+// steinwallet: a static browser wallet, served from Cloudflare's edge. It
+// holds no state and no secrets; keys stay in the user's browser, which talks
+// to a Stein node's public RPC directly.
+{
+  "name": "stein-wallet",
+  "compatibility_date": "2026-11-01",
+  // wallet.steinchain.com is canonical. The workers.dev address stays as a
+  // fallback.
+  "routes": [{ "pattern": "wallet.steinchain.com", "custom_domain": true }],
+  "workers_dev": true,
+  "assets": {
+    "directory": "./out",
+    "not_found_handling": "404-page"
+  }
+}

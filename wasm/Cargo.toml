@@ -1,0 +1,35 @@
+[package]
+name = "stein-wallet-core"
+description = "Stein Chain wallet core: FN-DSA-512 (draft FIPS 206) keys, addresses and signed transfers, for WebAssembly"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# Pinned exactly, as in stein-chain (SPEC §3.5): scheme tag 3 means this draft
+# of FN-DSA, so the wallet must sign with the version the chain verifies with.
+fn-dsa = "=0.4.0"
+blake3 = { version = "1.8", default-features = false }
+rand_core = "0.6"
+zeroize = "1"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+# Key generation keeps large buffers on the stack, which unoptimised code can
+# overflow (as in stein-chain's workspace).
+[profile.dev.package.fn-dsa-kgen]
+opt-level = 3
+[profile.dev.package.fn-dsa-sign]
+opt-level = 3
+[profile.dev.package.fn-dsa-vrfy]
+opt-level = 3
+[profile.dev.package.fn-dsa-comm]
+opt-level = 3

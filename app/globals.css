@@ -1,0 +1,34 @@
+@import "tailwindcss";
+
+/* Stein Chain brand tokens: the navy and blue of steinscan. */
+@theme {
+  --color-background: #070d1a;
+  --color-foreground: #f1f5f9;
+  --color-border: #1e293b;
+  --color-accent: #3b82f6;
+  --color-brand: #1366d6;
+}
+
+html, body {
+  background: var(--color-background);
+  color: var(--color-foreground);
+  height: 100%;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  border-color: var(--color-border);
+}
+
+/* Soft blue glow behind the hero, fading into the page background. */
+body {
+  background:
+    radial-gradient(1100px 520px at 50% -160px, rgba(19, 102, 214, 0.22), transparent 70%),
+    var(--color-background);
+  background-repeat: no-repeat;
+}
+
+html {
+  scroll-behavior: smooth;
+}

@@ -1,0 +1,4 @@
+# FN-DSA key generation needs more stack than the 1 MiB a WebAssembly module
+# gets by default.
+[target.wasm32-unknown-unknown]
+rustflags = ["-C", "link-arg=-zstack-size=8388608"]

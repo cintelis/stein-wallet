@@ -1,0 +1,10 @@
+# Security headers for every page (Cloudflare Workers static assets).
+#
+# script-src: Next.js inlines small bootstrap scripts in a static export, and
+# the wallet core is WebAssembly. connect-src: only the Stein nodes listed in
+# lib/stein/rpc.ts, so a page cannot send the key anywhere else.
+/*
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://rpc.steinchain.com https://stein-follower.nick-598.workers.dev http://127.0.0.1:8645; base-uri 'none'; form-action 'none'; frame-ancestors 'none'
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: no-referrer
+  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=()
