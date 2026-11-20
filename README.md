@@ -77,8 +77,8 @@ steinchain.com, whatever the request says, so no other site can use this page
 to collect signatures.
 
 steinchain.com verifies statements with a build of this core
-(`public/stein_wallet_core.wasm`), vendored in the stein-chain repository
-under `website/vendor/stein-wallet-core/`. After changing the core's
+(`public/stein_wallet_core.wasm`), vendored in the stein-site repository
+under `vendor/stein-wallet-core/`. After changing the core's
 statement functions, copy the new build and `lib/stein/core.mjs` there.
 
 ## Scope
