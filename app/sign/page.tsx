@@ -1,8 +1,9 @@
 'use client';
 
-// /sign: steinchain.com asks this wallet to sign a statement (see
-// lib/stein/statement.ts). The page shows exactly what is asked, signs only
-// when the user says so, and sends them back to the site with the answer.
+// /sign: steinchain.com asks this wallet to sign a statement, or for the
+// account's inbox key (see lib/stein/statement.ts). The page shows exactly
+// what is asked, answers only when the user says so, and sends them back to
+// the site with the answer.
 
 import { useEffect, useState } from 'react';
 import Logo from '@/components/layout/Logo';
@@ -57,8 +58,21 @@ function Unlock() {
   );
 }
 
+const ACTION: Record<SignRequest['kind'], string> = {
+  register: 'Sign and register',
+  message: 'Sign and send',
+  inbox: 'Sign and open an inbox',
+  open: 'Show my messages',
+};
+const WORKING: Record<SignRequest['kind'], string> = {
+  register: 'Signing…',
+  message: 'Signing…',
+  inbox: 'Signing…',
+  open: 'Opening…',
+};
+
 function Request({ request }: { request: SignRequest }) {
-  const { address, unlocked, signStatement } = useWallet();
+  const { address, unlocked, answer } = useWallet();
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -88,7 +102,7 @@ function Request({ request }: { request: SignRequest }) {
   return (
     <div className="space-y-4">
       <div className={ui.side}>
-        <div className={ui.label}>Signing as</div>
+        <div className={ui.label}>{request.kind === 'open' ? 'Account' : 'Signing as'}</div>
         <div className="mt-1 font-mono text-sm text-slate-100" title={address}>
           {short(address)}
         </div>
@@ -99,12 +113,24 @@ function Request({ request }: { request: SignRequest }) {
           <b className="text-slate-50">{SITE_NAME}</b> asks you to prove that you hold this
           account. Signing registers its address with Stein Chain.
         </p>
+      ) : request.kind === 'inbox' ? (
+        <p className="text-sm leading-relaxed text-slate-300">
+          <b className="text-slate-50">{SITE_NAME}</b> asks you to open an inbox for this account.
+          Signing registers its address and the public half of its inbox key, so that anyone can
+          send it an encrypted message that only this wallet can open.
+        </p>
+      ) : request.kind === 'open' ? (
+        <p className="text-sm leading-relaxed text-slate-300">
+          <b className="text-slate-50">{SITE_NAME}</b> asks for this account&apos;s inbox key, to
+          show you the messages sent to it. The key opens those messages and nothing else: it
+          cannot sign, and it cannot move STEIN.
+        </p>
       ) : (
         <>
           <p className="text-sm leading-relaxed text-slate-300">
             <b className="text-slate-50">{SITE_NAME}</b> asks you to sign this message. It will be
-            sent, encrypted, to the Stein Chain inbox, and whoever reads it will see that it came
-            from this account.
+            sent, encrypted, to the inbox it is addressed to, and whoever reads it will see that it
+            came from this account.
           </p>
           <div className={ui.side}>
             <div className={ui.label}>Message</div>
@@ -115,11 +141,20 @@ function Request({ request }: { request: SignRequest }) {
         </>
       )}
 
-      <p className="text-xs leading-relaxed text-slate-500">
-        This is a signature, not a transaction: it moves no STEIN, costs no fee and cannot be used
-        on the chain. Your key stays in this browser; only your public key and the signature go
-        back to {SITE_NAME}.
-      </p>
+      {request.kind === 'open' ? (
+        <p className="text-xs leading-relaxed text-slate-500">
+          Nothing is signed. The inbox key is made from your account key and goes to the{' '}
+          {SITE_NAME} page in this browser, which keeps it until you close the page; it is never
+          sent to a server. Your account key stays here.
+        </p>
+      ) : (
+        <p className="text-xs leading-relaxed text-slate-500">
+          This is a signature, not a transaction: it moves no STEIN, costs no fee and cannot be
+          used on the chain. Your key stays in this browser; only your public key
+          {request.kind === 'inbox' ? ', the public half of your inbox key' : ''} and the signature
+          go back to {SITE_NAME}.
+        </p>
+      )}
 
       {!unlocked ? (
         <Unlock />
@@ -128,18 +163,18 @@ function Request({ request }: { request: SignRequest }) {
           type="button"
           disabled={busy}
           className={ui.primary}
-          onClick={() => {
+          onClick={async () => {
             setBusy(true);
             setErr(null);
             try {
-              window.location.assign(answerUrl(request, signStatement(request)));
+              window.location.assign(answerUrl(request, await answer(request)));
             } catch (error) {
               setErr(readable(error));
               setBusy(false);
             }
           }}
         >
-          {busy ? 'Signing…' : request.kind === 'register' ? 'Sign and register' : 'Sign and send'}
+          {busy ? WORKING[request.kind] : ACTION[request.kind]}
         </button>
       )}
       {err && <p className={ui.error}>{err}</p>}
@@ -170,7 +205,7 @@ export default function Sign() {
         </div>
       </a>
       <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4 shadow-2xl shadow-black/40">
-        <h1 className="mb-4 text-xl font-bold tracking-tight">Signature request</h1>
+        <h1 className="mb-4 text-xl font-bold tracking-tight">Request from {SITE_NAME}</h1>
         {!ready || !parsed ? (
           <p className="py-10 text-center font-mono text-[11px] tracking-widest text-slate-600">
             LOADING WALLET…

@@ -30,6 +30,8 @@ npm run dev            # http://localhost:3000
 | `wasm/` | The wallet core, in Rust: key from seed, addresses, encoding and signing a transfer. Compiled to WebAssembly |
 | `lib/stein/core.mjs` | The only caller of the WebAssembly core |
 | `lib/stein/keystore.ts` | The key at rest: AES-256-GCM under a PBKDF2 passphrase key, in `localStorage`; seed-file import and export |
+| `lib/stein/inbox.mjs` | The account's inbox key, derived from the seed: what messages to it on steinchain.com are sealed to |
+| `lib/stein/statement.ts`, `app/sign/` | What steinchain.com may ask of the wallet, and the page that answers |
 | `lib/stein/rpc.ts` | Networks and the node RPC, with failover across endpoints |
 | `lib/stein/amount.ts` | STEIN amounts as integers of base units; transfer sizes and fees |
 | `components/wallet/WalletContext.tsx` | `useWallet()`: the key, the network, the account, sending |
@@ -66,8 +68,14 @@ fragment is never sent to a server.
 
 - **Register**: signs the account's own address, so the site can list it as
   held.
-- **Message**: signs the site's inbox key and the message text, so the reader
-  of the message knows which account wrote it.
+- **Inbox**: signs the account's address and the public half of its inbox
+  key (below), so the site can list it as held and anyone can send it an
+  encrypted message.
+- **Message**: signs the recipient inbox's key and the message text, so the
+  reader of the message knows which account wrote it.
+- **Open**: signs nothing. Gives steinchain.com/mailbox, and no other page,
+  the seed of the account's inbox key pair, so that page can open the
+  messages sent to this account.
 
 The core signs a statement over `"STEIN-STATEMENT-v1" ‖ kind ‖ payload`. A
 transaction is signed over `"STEIN-SIG-v1" ‖ …`, so neither can stand in for
@@ -80,6 +88,30 @@ steinchain.com verifies statements with a build of this core
 (`public/stein_wallet_core.wasm`), vendored in the stein-site repository
 under `vendor/stein-wallet-core/`. After changing the core's
 statement functions, copy the new build and `lib/stein/core.mjs` there.
+
+### The inbox key
+
+An account key only signs, so it cannot open a message. The inbox key is a
+second key, ML-KEM-768 (FIPS 203), derived from the same seed
+(`lib/stein/inbox.mjs`):
+
+```
+inbox seed = HKDF-SHA-256(key: the 32-byte account seed, no salt,
+                          info: "stein-wallet inbox key v1"), 64 bytes
+key pair   = ML-KEM-768 key generation from that seed
+```
+
+Whoever holds the account seed holds the inbox, on any device, with nothing
+more to back up. The derivation is one-way: the inbox seed opens messages
+and nothing else. It cannot sign or move STEIN, and the account seed cannot
+be found from it. It is still a secret: it leaves the wallet only on an
+**Open** request, after a click, in the fragment of a link to
+steinchain.com/mailbox.
+
+The derivation must never change, or restored wallets would lose their
+inboxes: `test/inbox.test.mjs` holds its values, and stein-site's tests hold
+the same ones. ML-KEM is `@noble/post-quantum`, pinned to the version
+stein-site uses.
 
 ## Scope
 
