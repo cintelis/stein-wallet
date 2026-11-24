@@ -1,5 +1,6 @@
 import TopBar from '@/components/layout/TopBar';
 import SiteFooter from '@/components/layout/SiteFooter';
+import { INBOX_URL } from '@/components/layout/site';
 import Activity from '@/components/wallet/Activity';
 import StatStrip from '@/components/wallet/StatStrip';
 import WalletCard from '@/components/wallet/WalletCard';
@@ -82,6 +83,16 @@ export default function Home() {
                 className="rounded-xl border border-slate-800 bg-slate-900 px-4 py-2.5 text-sm font-semibold text-slate-100 transition hover:border-slate-600"
               >
                 See how it works
+              </a>
+              <a
+                href={INBOX_URL}
+                className="flex items-center gap-2 rounded-xl border border-slate-800 bg-slate-900 px-4 py-2.5 text-sm font-semibold text-slate-100 transition hover:border-slate-600"
+              >
+                <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <polyline points="22 12 16 12 14 15 10 15 8 12 2 12" />
+                  <path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
+                </svg>
+                Read your inbox
               </a>
             </div>
           </div>
