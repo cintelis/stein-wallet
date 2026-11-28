@@ -20,6 +20,8 @@ export const NETWORKS: Network[] = [
   },
 ];
 
+import type { Holding, Pool } from './assets';
+
 export interface Status {
   chain_id: number;
   genesis_hash: string;
@@ -39,6 +41,16 @@ export interface Account {
   balance: string;
   nonce: number;
   key_registered: boolean;
+  /** Tokens and pool shares the account holds. Absent on a node that predates tokens. */
+  holdings?: Holding[];
+}
+
+/** What a pool did with a swap, as the node derives it. */
+export interface Outcome {
+  /** "swapped", or why the pool returned what was paid. */
+  result?: string;
+  /** Base units paid out, as a decimal string. */
+  amount_out?: string;
 }
 
 export interface TxView {
@@ -53,6 +65,17 @@ export interface TxView {
   registers_key: boolean;
   size: number;
   height: number;
+  /** "transfer", "transfer_token", "swap"… Absent on a node that predates tokens. */
+  kind?: string;
+  action?: {
+    token?: string;
+    amount?: string;
+    asset_in?: string;
+    amount_in?: string;
+    asset_out?: string;
+    symbol?: string;
+  };
+  outcome?: Outcome;
 }
 
 /** A node answered and refused the request. Retrying elsewhere will not help. */
@@ -101,6 +124,34 @@ export async function getTxHeight(network: Network, id: string): Promise<number 
     return state.status === 'included' ? (state.height ?? null) : null;
   } catch (e) {
     if (e instanceof Rejected) return null;
+    throw e;
+  }
+}
+
+/** Whether a submitted transaction is in a block yet; if so its height, and what a pool did with it. */
+export async function getTxState(
+  network: Network,
+  id: string,
+): Promise<{ height: number; outcome: Outcome | null } | null> {
+  try {
+    const state = await request<{ status: string; height?: number; tx?: { outcome?: Outcome } }>(
+      network,
+      `/tx/${id}`,
+    );
+    if (state.status !== 'included' || state.height === undefined) return null;
+    return { height: state.height, outcome: state.tx?.outcome ?? null };
+  } catch (e) {
+    if (e instanceof Rejected) return null;
+    throw e;
+  }
+}
+
+/** The network's liquidity pools. Empty on a node that predates them. */
+export async function getPools(network: Network): Promise<Pool[]> {
+  try {
+    return await request<Pool[]>(network, '/pools');
+  } catch (e) {
+    if (e instanceof Rejected) return [];
     throw e;
   }
 }

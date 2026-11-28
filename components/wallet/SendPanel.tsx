@@ -1,17 +1,19 @@
 'use client';
 
-// Send tab: unlock if needed, then recipient, amount and the exact fee. The
-// fee is the chain's minimum for the transfer's size, which is known before
-// signing: 790 bytes, or 1,688 for the account's first transaction, which
-// carries its public key.
+// Send tab: unlock if needed, then what to send (STEIN, or a token the
+// account holds), the recipient, the amount and the exact fee. The fee is the
+// chain's minimum for the transaction's size, which is known before signing:
+// 790 bytes for STEIN and 822 for a token, plus 898 on the account's first
+// transaction, which carries its public key.
 
 import { useState } from 'react';
-import { formatStein, parseStein, transferFee, TRANSFER_BYTES } from '@/lib/stein/amount';
-import { formatDuration } from '@/lib/stein/time';
+import { formatStein } from '@/lib/stein/amount';
+import { STEIN, STEIN_CHOICE, formatUnits, names, parseUnits, txBytes } from '@/lib/stein/assets';
+import SentNotice from './SentNotice';
 import { useWallet } from './WalletContext';
-import { readable, ui } from './util';
+import { readable, short, ui } from './util';
 
-function UnlockForm() {
+export function UnlockForm({ to = 'send' }: { to?: string }) {
   const { unlock } = useWallet();
   const [passphrase, setPassphrase] = useState('');
   const [busy, setBusy] = useState(false);
@@ -33,7 +35,7 @@ function UnlockForm() {
       }}
     >
       <p className="text-sm leading-relaxed text-slate-400">
-        The wallet is locked. Enter your passphrase to send.
+        The wallet is locked. Enter your passphrase to {to}.
       </p>
       <input
         type="password"
@@ -53,7 +55,8 @@ function UnlockForm() {
 }
 
 export default function SendPanel() {
-  const { unlocked, address, account, status, network, checkAddress, send, lastSent } = useWallet();
+  const { unlocked, address, account, status, checkAddress, send, sendToken } = useWallet();
+  const [asset, setAsset] = useState(STEIN);
   const [to, setTo] = useState('');
   const [amount, setAmount] = useState('');
   const [busy, setBusy] = useState(false);
@@ -61,10 +64,24 @@ export default function SendPanel() {
 
   if (!unlocked) return <UnlockForm />;
 
-  const balance = account ? BigInt(account.balance) : null;
+  // STEIN, and every token the account holds some of.
+  const held = (account?.holdings ?? []).filter((h) => BigInt(h.balance) > 0n);
+  const holding = held.find((h) => h.asset === asset);
+  // A token that has since been spent to nothing is no longer on offer.
+  const sending = holding ? asset : STEIN;
+  const choice = holding ? { asset, symbol: holding.symbol, decimals: holding.decimals } : STEIN_CHOICE;
+
+  const label = names(held.map((h) => ({ asset: h.asset, symbol: h.symbol, decimals: h.decimals })));
+
+  const stein = account ? BigInt(account.balance) : null;
+  const balance = holding ? BigInt(holding.balance) : stein;
   const registersKey = account ? !account.key_registered : false;
-  const fee = status ? transferFee(BigInt(status.min_fee_per_byte), registersKey) : null;
-  const units = parseStein(amount);
+  const bytes = txBytes({ kind: sending === STEIN ? 'transfer' : 'transfer_token' }, registersKey);
+  const fee = status ? BigInt(status.min_fee_per_byte) * BigInt(bytes) : null;
+  const units = parseUnits(amount, choice.decimals);
+  // The fee is always STEIN: it comes off the amount only when STEIN is what is sent.
+  const spendable =
+    balance === null || fee === null ? null : sending === STEIN ? balance - fee : balance;
   const toProblem = to.trim() ? checkAddress(to) : null;
 
   const problem = !to.trim()
@@ -74,12 +91,18 @@ export default function SendPanel() {
       : !amount
         ? 'Enter an amount.'
         : units === null || units === 0n
-          ? 'Enter an amount above zero, with at most 9 decimal places.'
-          : balance === null || fee === null
+          ? choice.decimals === 0
+            ? 'Enter a whole amount above zero.'
+            : `Enter an amount above zero, with at most ${choice.decimals} decimal places.`
+          : spendable === null || stein === null || fee === null
             ? 'Waiting for the network…'
-            : units + fee > balance
-              ? 'The balance does not cover the amount plus the fee.'
-              : null;
+            : stein < fee
+              ? 'The STEIN balance does not cover the network fee.'
+              : units > spendable
+                ? sending === STEIN
+                  ? 'The balance does not cover the amount plus the fee.'
+                  : `You hold less ${choice.symbol} than that.`
+                : null;
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -87,7 +110,8 @@ export default function SendPanel() {
     setBusy(true);
     setErr(null);
     try {
-      await send(to.trim(), units);
+      if (sending === STEIN) await send(to.trim(), units);
+      else await sendToken(sending, to.trim(), units);
       setAmount('');
     } catch (error) {
       setErr(readable(error));
@@ -114,18 +138,37 @@ export default function SendPanel() {
                 autoComplete="off"
                 className={ui.bigInput}
               />
-              <span className="text-sm font-semibold text-slate-500">STEIN</span>
+              {held.length === 0 ? (
+                <span className="text-sm font-semibold text-slate-500">STEIN</span>
+              ) : (
+                <select
+                  value={sending}
+                  onChange={(e) => {
+                    setAsset(e.target.value);
+                    setAmount('');
+                  }}
+                  aria-label="What to send"
+                  className={`${ui.select} shrink-0`}
+                >
+                  <option value={STEIN}>STEIN</option>
+                  {held.map((h) => (
+                    <option key={h.asset} value={h.asset}>
+                      {label.get(h.asset)}
+                    </option>
+                  ))}
+                </select>
+              )}
             </div>
           </div>
           <div className="shrink-0 text-right">
             <div className="text-xs text-slate-500">
-              Balance: {balance !== null ? formatStein(balance) : '—'}
+              Balance: {balance !== null ? formatUnits(balance, choice.decimals) : '—'}
             </div>
             <button
               type="button"
-              disabled={balance === null || fee === null || balance <= fee}
+              disabled={spendable === null || spendable <= 0n}
               onClick={() => {
-                if (balance !== null && fee !== null) setAmount(formatStein(balance - fee).replace(/,/g, ''));
+                if (spendable !== null) setAmount(formatUnits(spendable, choice.decimals).replace(/,/g, ''));
               }}
               className={`${ui.ghost} mt-1.5`}
             >
@@ -157,6 +200,12 @@ export default function SendPanel() {
       </div>
 
       <div className="space-y-1.5 px-1">
+        {holding && (
+          <div className={ui.meta}>
+            <span>{holding.symbol} is the token</span>
+            <span className="font-mono text-xs text-slate-300">{short(holding.asset)}</span>
+          </div>
+        )}
         <div className={ui.meta}>
           <span>Network fee</span>
           <span className="tabular-nums text-slate-300">
@@ -166,7 +215,7 @@ export default function SendPanel() {
         <div className={ui.meta}>
           <span>Size</span>
           <span className="tabular-nums text-slate-300">
-            {(registersKey ? TRANSFER_BYTES.first : TRANSFER_BYTES.later).toLocaleString('en-US')} bytes
+            {bytes.toLocaleString('en-US')} bytes
             {registersKey && ' · first transaction, carries your public key'}
           </span>
         </div>
@@ -178,32 +227,7 @@ export default function SendPanel() {
       </button>
       {problem && (to || amount) && <p className="text-center text-xs text-slate-500">{problem}</p>}
 
-      {lastSent && (
-        <div className={lastSent.height === null ? ui.warn : ui.ok}>
-          <div className="font-semibold">
-            {lastSent.height === null
-              ? 'Sent. Waiting for a block…'
-              : `Included in block ${lastSent.height.toLocaleString('en-US')}${
-                  lastSent.tookMs === null ? '' : ` after ${formatDuration(lastSent.tookMs)}`
-                }`}
-          </div>
-          <div className="mt-1 tabular-nums">
-            {lastSent.size.toLocaleString('en-US')} bytes · fee {formatStein(lastSent.fee)} STEIN
-          </div>
-          {network.explorer ? (
-            <a
-              href={`${network.explorer}/#/tx/${lastSent.id}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="mt-1 block break-all font-mono text-[11px] underline decoration-dotted underline-offset-2"
-            >
-              {lastSent.id}
-            </a>
-          ) : (
-            <code className="mt-1 block break-all font-mono text-[11px]">{lastSent.id}</code>
-          )}
-        </div>
-      )}
+      <SentNotice what="send" />
     </form>
   );
 }

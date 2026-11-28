@@ -1,13 +1,14 @@
 'use client';
 
 // The main card. Without a wallet in this browser: Create or Import. With
-// one: Send and Receive. Panels stay mounted so switching tabs keeps what was
-// typed.
+// one: Send, Swap and Receive. Panels stay mounted so switching tabs keeps
+// what was typed.
 
 import { useState } from 'react';
 import OnboardPanel from './OnboardPanel';
 import ReceivePanel from './ReceivePanel';
 import SendPanel from './SendPanel';
+import SwapPanel from './SwapPanel';
 import { useWallet } from './WalletContext';
 import { download, ui } from './util';
 
@@ -21,7 +22,12 @@ function Tabs<T extends string>({
   onChange: (key: T) => void;
 }) {
   return (
-    <div role="tablist" className="mb-3 grid grid-cols-2 gap-1 rounded-xl bg-slate-950/70 p-1">
+    <div
+      role="tablist"
+      className={`mb-3 grid gap-1 rounded-xl bg-slate-950/70 p-1 ${
+        tabs.length === 3 ? 'grid-cols-3' : 'grid-cols-2'
+      }`}
+    >
       {tabs.map((t) => (
         <button
           key={t.key}
@@ -66,7 +72,7 @@ function BackupNotice() {
 export default function WalletCard() {
   const { ready, coreError, address, network } = useWallet();
   const [onboardTab, setOnboardTab] = useState<'create' | 'import'>('create');
-  const [tab, setTab] = useState<'send' | 'receive'>('send');
+  const [tab, setTab] = useState<'send' | 'swap' | 'receive'>('send');
 
   return (
     <div id="wallet" className="w-full scroll-mt-6">
@@ -97,6 +103,7 @@ export default function WalletCard() {
             <Tabs
               tabs={[
                 { key: 'send', label: 'Send' },
+                { key: 'swap', label: 'Swap' },
                 { key: 'receive', label: 'Receive' },
               ]}
               value={tab}
@@ -105,6 +112,9 @@ export default function WalletCard() {
             <BackupNotice />
             <div hidden={tab !== 'send'}>
               <SendPanel />
+            </div>
+            <div hidden={tab !== 'swap'}>
+              <SwapPanel />
             </div>
             <div hidden={tab !== 'receive'}>
               <ReceivePanel />

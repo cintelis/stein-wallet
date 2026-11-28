@@ -9,8 +9,9 @@
 use zeroize::Zeroize;
 
 use crate::{
-    address_from_text, address_of, address_to_text, sign_transfer, verify_statement, Error, Key,
-    Transfer, ADDRESS_TEXT_LEN, PUBLIC_KEY_LEN, SEED_LEN, SIGNATURE_LEN,
+    address_from_text, address_of, address_to_text, sign_action, sign_transfer, verify_statement,
+    Action, Asset, Error, Key, Request, Transfer, ADDRESS_TEXT_LEN, PUBLIC_KEY_LEN, SEED_LEN,
+    SIGNATURE_LEN,
 };
 
 /// Length of the input to [`stein_transfer`].
@@ -24,11 +25,17 @@ fn code(error: Error) -> i32 {
         Error::AddressChecksum => -4,
         Error::ZeroAmount => -5,
         Error::FeeOverflow => -6,
+        Error::SameAsset => -8,
     }
 }
 
 /// The output buffer is too small.
 const TOO_SMALL: i32 = -7;
+/// The input is not one of the layouts [`stein_sign`] takes.
+const BAD_INPUT: i32 = -9;
+
+/// Length of what every input to [`stein_sign`] starts with.
+pub const SIGN_HEADER_LEN: usize = 32 + 32 + 8 + 8 + 8 + 16 + 1 + 1;
 
 /// Allocates `len` bytes in the module's memory.
 #[no_mangle]
@@ -170,6 +177,109 @@ pub unsafe extern "C" fn stein_transfer(input: *const u8, out: *mut u8, out_cap:
 
     let signed =
         Key::from_seed(&seed).and_then(|mut key| sign_transfer(&mut key, &transfer, &randomness));
+    seed.zeroize();
+    randomness.zeroize();
+    let signed = match signed {
+        Ok(signed) => signed,
+        Err(e) => return code(e),
+    };
+    let len = 32 + 16 + signed.raw.len();
+    if out.len() < len {
+        return TOO_SMALL;
+    }
+    out[..32].copy_from_slice(&signed.id);
+    out[32..48].copy_from_slice(&signed.fee.to_le_bytes());
+    out[48..len].copy_from_slice(&signed.raw);
+    len as i32
+}
+
+fn bytes32_at(input: &[u8], at: usize) -> [u8; 32] {
+    let mut b = [0u8; 32];
+    b.copy_from_slice(&input[at..at + 32]);
+    b
+}
+
+/// An asset as [`stein_sign`] takes it: a tag, 0 for STEIN or 1 for a token,
+/// then 32 bytes that are the token's address (and ignored for STEIN).
+fn asset_at(input: &[u8], at: usize) -> Option<Asset> {
+    match input[at] {
+        0 => Some(Asset::Stein),
+        1 => Some(Asset::Token(bytes32_at(input, at + 1))),
+        _ => None,
+    }
+}
+
+fn action_from(kind: u8, p: &[u8]) -> Option<Action> {
+    match (kind, p.len()) {
+        (0, 48) => Some(Action::Transfer {
+            to: bytes32_at(p, 0),
+            amount: u128_at(p, 32),
+        }),
+        (2, 80) => Some(Action::TransferToken {
+            token: bytes32_at(p, 0),
+            to: bytes32_at(p, 32),
+            amount: u128_at(p, 64),
+        }),
+        (5, 98) => Some(Action::Swap {
+            asset_in: asset_at(p, 0)?,
+            amount_in: u128_at(p, 33),
+            asset_out: asset_at(p, 49)?,
+            min_out: u128_at(p, 82),
+        }),
+        _ => None,
+    }
+}
+
+/// Signs a transaction of any kind this wallet makes.
+///
+/// Input, integers little-endian: `seed[32] ‖ randomness[32] ‖ chain_id u64 ‖
+/// nonce u64 ‖ expires_at u64 ‖ min_fee_per_byte u128 ‖ register_key u8 ‖
+/// kind u8`, then by kind:
+/// - 0, a transfer: `to[32] ‖ amount u128`
+/// - 2, a token transfer: `token[32] ‖ to[32] ‖ amount u128`
+/// - 5, a swap: `asset_in[33] ‖ amount_in u128 ‖ asset_out[33] ‖ min_out u128`,
+///   an asset being a tag (0 STEIN, 1 token) and 32 bytes of address.
+///
+/// Output: `txid[32] ‖ fee u128 ‖ transaction`. Returns its length.
+///
+/// # Safety
+/// `input` must point to `input_len` readable bytes and `out` to `out_cap`
+/// writable bytes.
+#[no_mangle]
+pub unsafe extern "C" fn stein_sign(
+    input: *const u8,
+    input_len: usize,
+    out: *mut u8,
+    out_cap: usize,
+) -> i32 {
+    if input_len < SIGN_HEADER_LEN {
+        return BAD_INPUT;
+    }
+    // SAFETY: per the contract above.
+    let (input, out) = unsafe {
+        (
+            std::slice::from_raw_parts(input, input_len),
+            std::slice::from_raw_parts_mut(out, out_cap),
+        )
+    };
+    let Some(action) = action_from(input[105], &input[SIGN_HEADER_LEN..]) else {
+        return BAD_INPUT;
+    };
+    let mut seed = [0u8; SEED_LEN];
+    seed.copy_from_slice(&input[..32]);
+    let mut randomness = [0u8; 32];
+    randomness.copy_from_slice(&input[32..64]);
+    let request = Request {
+        chain_id: u64_at(input, 64),
+        nonce: u64_at(input, 72),
+        expires_at: u64_at(input, 80),
+        min_fee_per_byte: u128_at(input, 88),
+        register_key: input[104] != 0,
+        action,
+    };
+
+    let signed =
+        Key::from_seed(&seed).and_then(|mut key| sign_action(&mut key, &request, &randomness));
     seed.zeroize();
     randomness.zeroize();
     let signed = match signed {

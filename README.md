@@ -2,8 +2,9 @@
 
 A browser wallet for [Stein Chain](https://github.com/steinchain/stein-chain),
 the post-quantum layer-1. Create or import an account, see its balance and
-activity, and send STEIN. Transfers are signed in the browser with FN-DSA-512
-(draft FIPS 206), the default scheme for Stein account keys.
+activity, send STEIN and tokens, and swap one asset for another through a
+liquidity pool. Everything is signed in the browser with FN-DSA-512 (draft
+FIPS 206), the default scheme for Stein account keys.
 
 Non-custodial and serverless: the key is generated and kept in the browser,
 encrypted under a passphrase, and the app is static files. There are no server
@@ -35,7 +36,7 @@ npm run dev            # http://localhost:3000
 | `lib/stein/rpc.ts` | Networks and the node RPC, with failover across endpoints |
 | `lib/stein/amount.ts` | STEIN amounts as integers of base units; transfer sizes and fees |
 | `components/wallet/WalletContext.tsx` | `useWallet()`: the key, the network, the account, sending |
-| `components/wallet/WalletCard.tsx` | The main card: Create / Import, then Send / Receive |
+| `components/wallet/WalletCard.tsx` | The main card: Create / Import, then Send / Swap / Receive |
 | `components/wallet/StatStrip.tsx`, `Activity.tsx` | Balance, network and fee tiles; the account's transactions |
 | `test/core.test.mjs` | The core against values from the chain's own wallet |
 | `scripts/e2e.mjs` | Signs with the core and submits to a real node |
@@ -112,6 +113,33 @@ The derivation must never change, or restored wallets would lose their
 inboxes: `test/inbox.test.mjs` holds its values, and stein-site's tests hold
 the same ones. ML-KEM is `@noble/post-quantum`, pinned to the version
 stein-site uses.
+
+## Tokens and swaps
+
+Tokens and liquidity pools are native transaction types on Stein Chain (SPEC
+§4.6, §4.7). The wallet:
+
+- **shows the tokens an account holds**, each with its address, because
+  symbols are not unique: two tokens may share one;
+- **sends a token** from the Send tab, which offers every token the account
+  holds;
+- **swaps through a pool** from the Swap tab. It shows what the pool would pay
+  by the chain's own formula on the reserves as last read, and sets the least
+  to accept half a percent below that. If the pool would pay less when the
+  swap is in a block, it returns what was paid; the network fee is spent
+  either way, and the wallet says which happened.
+
+The fee is always paid in STEIN, so an account needs some STEIN to move a
+token. Issuing a token and adding or removing a pool's liquidity are done with
+the `stein` command-line wallet; the wallet shows pool shares but does not
+create them.
+
+The devnet has a token called **DEMO** (6 decimals,
+`stab64bfd3416eeb58c8a0ffd85b750d807aedfa4d3de4a71eb2a2f6fc2c0ee8ee98122ce0`)
+with a STEIN/DEMO pool, to try this with. Like devnet STEIN it has no value.
+
+`scripts/e2e-tokens.mjs` swaps and sends a token against a real node with the
+wallet's own signing core.
 
 ## Scope
 

@@ -2,6 +2,7 @@ import TopBar from '@/components/layout/TopBar';
 import SiteFooter from '@/components/layout/SiteFooter';
 import { INBOX_URL } from '@/components/layout/site';
 import Activity from '@/components/wallet/Activity';
+import Holdings from '@/components/wallet/Holdings';
 import StatStrip from '@/components/wallet/StatStrip';
 import WalletCard from '@/components/wallet/WalletCard';
 
@@ -36,6 +37,10 @@ const FAQ: { q: string; a: string }[] = [
   {
     q: 'Why was my first transfer bigger?',
     a: 'An account’s first transaction carries its public key, so the chain can store it: 1,688 bytes. Every later one leaves the key out and is 790 bytes. The fee follows the size.',
+  },
+  {
+    q: 'What are tokens and swaps?',
+    a: 'Anyone can issue a token on Stein Chain, and any two assets can have a liquidity pool that trades one for the other at the ratio of what it holds. The Swap tab trades through a pool: it shows what you would receive and the least you will accept, and if the pool cannot pay that much it returns what you paid. Token symbols are not unique, so check the address. The devnet has a token called DEMO to try this with; like devnet STEIN, it has no value.',
   },
   {
     q: 'Can I use MetaMask or a hardware wallet?',
@@ -100,6 +105,7 @@ export default function Home() {
         </section>
 
         <StatStrip />
+        <Holdings />
         <Activity />
 
         <section id="how" className="mt-12 scroll-mt-6 border-t border-slate-900 pt-10">

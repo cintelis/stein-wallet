@@ -143,3 +143,54 @@ test("a transfer's signature is not a statement's, nor the reverse", () => {
     assert.equal(core.verifyStatement({ publicKey, kind, payload: body, signature }), false);
   }
 });
+
+// A token transfer and a swap, as the devnet accepted them from this core
+// (blocks 2424 and 2423): the layout below is the one the chain decoded.
+const TOKEN = "stab64bfd3416eeb58c8a0ffd85b750d807aedfa4d3de4a71eb2a2f6fc2c0ee8ee98122ce0";
+const common = { seed: seed(0x07), chainId: 31337n, nonce: 5n, expiresAt: 300n, minFeePerByte: 10n };
+
+test("a token transfer has the chain's size, fee and layout", () => {
+  const [, to] = VECTORS[1];
+  const tx = core.signTokenTransfer({ ...common, token: TOKEN, to, amount: 9_969_006n, registerKey: false });
+  assert.equal(tx.raw.length, 822);
+  assert.equal(tx.fee, 8220n);
+  // After the 73 bytes every body starts with: action 2, token, to, amount.
+  const view = new DataView(tx.raw.buffer, tx.raw.byteOffset, tx.raw.byteLength);
+  assert.equal(tx.raw[73], 2);
+  assert.equal(hex(tx.raw.subarray(74, 106)), TOKEN.slice(2, 66));
+  assert.equal(hex(tx.raw.subarray(106, 138)), to.slice(2, 66));
+  assert.equal(view.getBigUint64(138, true), 9_969_006n);
+  assert.deepEqual([tx.raw[154], tx.raw[155]], [0, 3]);
+  assert.equal(core.signTokenTransfer({ ...common, token: TOKEN, to, amount: 1n, registerKey: true }).raw.length, 1720);
+});
+
+test("a swap has the chain's size, fee and layout, with STEIN as one byte and a token as 33", () => {
+  const STEIN = "stein";
+  const buy = core.signSwap({ ...common, assetIn: STEIN, amountIn: 2_000_000_000n, assetOut: TOKEN, minOut: 7n, registerKey: false });
+  assert.equal(buy.raw.length, 808);
+  assert.equal(buy.fee, 8080n);
+  const view = new DataView(buy.raw.buffer, buy.raw.byteOffset, buy.raw.byteLength);
+  // Action 5, STEIN (tag 0), amount in, token (tag 1 and its address), least out.
+  assert.deepEqual([buy.raw[73], buy.raw[74]], [5, 0]);
+  assert.equal(view.getBigUint64(75, true), 2_000_000_000n);
+  assert.equal(buy.raw[91], 1);
+  assert.equal(hex(buy.raw.subarray(92, 124)), TOKEN.slice(2, 66));
+  assert.equal(view.getBigUint64(124, true), 7n);
+  assert.deepEqual([buy.raw[140], buy.raw[141]], [0, 3]);
+
+  const sell = core.signSwap({ ...common, assetIn: TOKEN, amountIn: 5n, assetOut: STEIN, minOut: 1n, registerKey: true });
+  assert.equal(sell.raw.length, 808 + 898);
+  assert.deepEqual([sell.raw[73], sell.raw[74], sell.raw[107 + 16]], [5, 1, 0]);
+});
+
+test("a swap of nothing, or of an asset for itself, is refused before signing", () => {
+  const swap = { ...common, assetIn: "stein", amountIn: 1n, assetOut: TOKEN, minOut: 1n, registerKey: false };
+  assert.throws(() => core.signSwap({ ...swap, amountIn: 0n }), /more than zero/);
+  assert.throws(() => core.signSwap({ ...swap, assetOut: "stein" }), /two different assets/);
+  assert.throws(() => core.signSwap({ ...swap, assetIn: TOKEN }), /two different assets/);
+  assert.throws(() => core.signSwap({ ...swap, assetOut: TOKEN.slice(0, -1) + "1" }), /checksum/);
+  assert.throws(
+    () => core.signTokenTransfer({ ...common, token: TOKEN, to: VECTORS[1][1], amount: 0n, registerKey: false }),
+    /more than zero/,
+  );
+});

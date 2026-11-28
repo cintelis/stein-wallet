@@ -62,6 +62,11 @@ const STATEMENT_PREFIX: &[u8; 18] = b"STEIN-STATEMENT-v1";
 const DOMAIN_TRANSACTION: u8 = 1;
 const TX_VERSION: u8 = 1;
 const ACTION_TRANSFER: u8 = 0;
+const ACTION_TRANSFER_TOKEN: u8 = 2;
+const ACTION_SWAP: u8 = 5;
+/// Everything in a transaction body before its action:
+/// version, chain id, sender, nonce, fee, expiry.
+const HEADER_LEN: usize = 1 + 8 + 32 + 8 + 16 + 8;
 
 /// Why an operation failed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -78,6 +83,8 @@ pub enum Error {
     ZeroAmount,
     /// The fee does not fit in 128 bits.
     FeeOverflow,
+    /// A swap of an asset for itself.
+    SameAsset,
 }
 
 /// BLAKE3 in derive-key mode, read as an extendable output.
@@ -304,48 +311,172 @@ pub struct SignedTransfer {
     pub raw: Vec<u8>,
 }
 
-fn encode_body(t: &Transfer, sender: &[u8; 32], fee: u128) -> Vec<u8> {
-    let mut body = Vec::with_capacity(BODY_LEN);
-    body.push(TX_VERSION);
-    body.extend_from_slice(&t.chain_id.to_le_bytes());
-    body.extend_from_slice(sender);
-    body.extend_from_slice(&t.nonce.to_le_bytes());
-    body.extend_from_slice(&fee.to_le_bytes());
-    body.extend_from_slice(&t.expires_at.to_le_bytes());
-    body.push(ACTION_TRANSFER);
-    body.extend_from_slice(&t.to);
-    body.extend_from_slice(&t.amount.to_le_bytes());
-    body
+/// STEIN, or a token by its address (SPEC §4.6).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Asset {
+    /// The native coin.
+    Stein,
+    /// A token, or a pool's shares.
+    Token([u8; 32]),
 }
 
-/// Encoded size of a transfer: what the fee is measured in.
-pub fn transfer_len(register_key: bool) -> usize {
+impl Asset {
+    fn encode(&self, out: &mut Vec<u8>) {
+        match self {
+            Self::Stein => out.push(0),
+            Self::Token(address) => {
+                out.push(1);
+                out.extend_from_slice(address);
+            }
+        }
+    }
+}
+
+/// What a transaction does: the actions this wallet signs, encoded as the
+/// chain's `Action` is (SPEC §4.2, §4.6, §4.7).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Action {
+    /// Move STEIN.
+    Transfer {
+        /// Recipient.
+        to: [u8; 32],
+        /// Base units to move.
+        amount: u128,
+    },
+    /// Move a token, or a pool's shares.
+    TransferToken {
+        /// The token's address.
+        token: [u8; 32],
+        /// Recipient.
+        to: [u8; 32],
+        /// Base units to move.
+        amount: u128,
+    },
+    /// Trade one asset for another through their pool.
+    Swap {
+        /// Asset paid.
+        asset_in: Asset,
+        /// Base units paid.
+        amount_in: u128,
+        /// Asset wanted.
+        asset_out: Asset,
+        /// Least to accept; otherwise the pool returns what was paid.
+        min_out: u128,
+    },
+}
+
+impl Action {
+    fn encode(&self) -> Vec<u8> {
+        let mut out = Vec::with_capacity(1 + 33 + 16 + 33 + 16);
+        match self {
+            Self::Transfer { to, amount } => {
+                out.push(ACTION_TRANSFER);
+                out.extend_from_slice(to);
+                out.extend_from_slice(&amount.to_le_bytes());
+            }
+            Self::TransferToken { token, to, amount } => {
+                out.push(ACTION_TRANSFER_TOKEN);
+                out.extend_from_slice(token);
+                out.extend_from_slice(to);
+                out.extend_from_slice(&amount.to_le_bytes());
+            }
+            Self::Swap {
+                asset_in,
+                amount_in,
+                asset_out,
+                min_out,
+            } => {
+                out.push(ACTION_SWAP);
+                asset_in.encode(&mut out);
+                out.extend_from_slice(&amount_in.to_le_bytes());
+                asset_out.encode(&mut out);
+                out.extend_from_slice(&min_out.to_le_bytes());
+            }
+        }
+        out
+    }
+
+    /// Refuses what the chain would refuse as malformed, before signing it.
+    fn check(&self) -> Result<(), Error> {
+        match self {
+            Self::Transfer { amount, .. } | Self::TransferToken { amount, .. } if *amount == 0 => {
+                Err(Error::ZeroAmount)
+            }
+            Self::Swap { amount_in: 0, .. } => Err(Error::ZeroAmount),
+            Self::Swap {
+                asset_in,
+                asset_out,
+                ..
+            } if asset_in == asset_out => Err(Error::SameAsset),
+            _ => Ok(()),
+        }
+    }
+}
+
+/// A transaction to sign: what every transaction carries, and its action.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Request {
+    /// Network the transaction is valid on.
+    pub chain_id: u64,
+    /// The sender's next nonce.
+    pub nonce: u64,
+    /// Last height at which the transaction may be included.
+    pub expires_at: u64,
+    /// The chain's minimum fee per encoded byte, in base units.
+    pub min_fee_per_byte: u128,
+    /// Attach the public key: required on the sender's first transaction,
+    /// refused on every later one.
+    pub register_key: bool,
+    /// What it does.
+    pub action: Action,
+}
+
+/// Encoded size of a transaction with this action: what the fee is measured in.
+pub fn action_len(action: &Action, register_key: bool) -> usize {
     // body + option tag + key (tagged) + signature (tagged)
     let key = if register_key { 1 + PUBLIC_KEY_LEN } else { 0 };
-    BODY_LEN + 1 + key + 1 + SIGNATURE_LEN
+    HEADER_LEN + action.encode().len() + 1 + key + 1 + SIGNATURE_LEN
 }
 
-/// Encodes and signs `transfer` from the account of `key`, paying the minimum
+/// Encoded size of a transfer.
+pub fn transfer_len(register_key: bool) -> usize {
+    action_len(
+        &Action::Transfer {
+            to: [0; 32],
+            amount: 1,
+        },
+        register_key,
+    )
+}
+
+/// Encodes and signs `request` from the account of `key`, paying the minimum
 /// fee for its size.
-pub fn sign_transfer(
+pub fn sign_action(
     key: &mut Key,
-    transfer: &Transfer,
+    request: &Request,
     randomness: &[u8; 32],
 ) -> Result<SignedTransfer, Error> {
-    if transfer.amount == 0 {
-        return Err(Error::ZeroAmount);
-    }
-    let len = transfer_len(transfer.register_key);
-    let fee = transfer
+    request.action.check()?;
+    let action = request.action.encode();
+    let len = action_len(&request.action, request.register_key);
+    let fee = request
         .min_fee_per_byte
         .checked_mul(len as u128)
         .ok_or(Error::FeeOverflow)?;
-    let body = encode_body(transfer, &key.address(), fee);
+
+    let mut body = Vec::with_capacity(HEADER_LEN + action.len());
+    body.push(TX_VERSION);
+    body.extend_from_slice(&request.chain_id.to_le_bytes());
+    body.extend_from_slice(&key.address());
+    body.extend_from_slice(&request.nonce.to_le_bytes());
+    body.extend_from_slice(&fee.to_le_bytes());
+    body.extend_from_slice(&request.expires_at.to_le_bytes());
+    body.extend_from_slice(&action);
     let signature = key.sign_body(&body, randomness)?;
 
     let mut raw = Vec::with_capacity(len);
     raw.extend_from_slice(&body);
-    if transfer.register_key {
+    if request.register_key {
         raw.push(1);
         raw.push(SCHEME_TAG);
         raw.extend_from_slice(key.public_key());
@@ -360,4 +491,27 @@ pub fn sign_transfer(
         fee,
         raw,
     })
+}
+
+/// Encodes and signs a transfer of STEIN.
+pub fn sign_transfer(
+    key: &mut Key,
+    transfer: &Transfer,
+    randomness: &[u8; 32],
+) -> Result<SignedTransfer, Error> {
+    sign_action(
+        key,
+        &Request {
+            chain_id: transfer.chain_id,
+            nonce: transfer.nonce,
+            expires_at: transfer.expires_at,
+            min_fee_per_byte: transfer.min_fee_per_byte,
+            register_key: transfer.register_key,
+            action: Action::Transfer {
+                to: transfer.to,
+                amount: transfer.amount,
+            },
+        },
+        randomness,
+    )
 }

@@ -15,8 +15,8 @@ import {
   useRef,
   useState,
 } from 'react';
-import { transferFee } from '@/lib/stein/amount';
-import { loadCore, type Core } from '@/lib/stein/core.mjs';
+import { STEIN, txBytes, type Pool } from '@/lib/stein/assets';
+import { loadCore, type Core, type SignedTransfer, type TransferRequest } from '@/lib/stein/core.mjs';
 import { inboxPublicKey, inboxSeed } from '@/lib/stein/inbox.mjs';
 import {
   deleteVault,
@@ -34,11 +34,13 @@ import {
   getAccount,
   getAccountTxs,
   getBlockTime,
+  getPools,
   getStatus,
-  getTxHeight,
+  getTxState,
   NETWORKS,
   submit,
   type Account,
+  type Outcome,
   type Network,
   type Status,
   type TxView,
@@ -49,7 +51,12 @@ import { readDeliveries, recordDelivery, type Deliveries } from '@/lib/stein/tim
 const NETWORK_KEY = 'stein-wallet:network';
 const POLL_MS = 8_000;
 
+/** What every transaction carries, as the signing core takes it. */
+type Common = Omit<TransferRequest, 'to' | 'amount'>;
+
 export interface Sent {
+  /** "send" or "swap": which panel shows it. */
+  what: 'send' | 'swap';
   id: string;
   size: number;
   fee: bigint;
@@ -59,6 +66,8 @@ export interface Sent {
   sentAt: number;
   /** Milliseconds from sending until this wallet saw it in a block, once known. */
   tookMs: number | null;
+  /** For a swap, once it is in a block: what the pool did. */
+  outcome: Outcome | null;
 }
 
 interface WalletState {
@@ -76,6 +85,8 @@ interface WalletState {
   status: Status | null;
   account: Account | null;
   txs: TxView[];
+  /** The network's liquidity pools. */
+  pools: Pool[];
   /** For transfers sent from this browser: milliseconds from sending to being seen in a block. */
   deliveries: Deliveries;
   /** When each block in the activity list was made, by height. */
@@ -94,7 +105,12 @@ interface WalletState {
   /** The seed-file text, for a backup. Requires an unlocked wallet. */
   backupText: () => string;
   markBackedUp: () => void;
+  /** Sends STEIN. */
   send: (to: string, amount: bigint) => Promise<Sent>;
+  /** Sends a token, or a pool's shares. */
+  sendToken: (token: string, to: string, amount: bigint) => Promise<Sent>;
+  /** Trades through a pool. If it would pay less than `minOut`, the pool returns what was paid. */
+  swap: (assetIn: string, amountIn: bigint, assetOut: string, minOut: bigint) => Promise<Sent>;
   /**
    * What steinchain.com asked for: a signed statement (never a transaction),
    * or this account's inbox key.
@@ -123,6 +139,7 @@ export default function WalletProvider({ children }: { children: React.ReactNode
   const [status, setStatus] = useState<Status | null>(null);
   const [account, setAccount] = useState<Account | null>(null);
   const [txs, setTxs] = useState<TxView[]>([]);
+  const [pools, setPools] = useState<Pool[]>([]);
   const [deliveries, setDeliveries] = useState<Deliveries>({});
   const [blockTimes, setBlockTimes] = useState<Record<number, number>>({});
   const [networkError, setNetworkError] = useState<string | null>(null);
@@ -145,14 +162,16 @@ export default function WalletProvider({ children }: { children: React.ReactNode
 
   const refresh = useCallback(async () => {
     try {
-      const [nextStatus, nextAccount, nextTxs] = await Promise.all([
+      const [nextStatus, nextAccount, nextTxs, nextPools] = await Promise.all([
         getStatus(network),
         address ? getAccount(network, address) : Promise.resolve(null),
         address ? getAccountTxs(network, address) : Promise.resolve([]),
+        getPools(network),
       ]);
       setStatus(nextStatus);
       setAccount(nextAccount);
       setTxs(nextTxs);
+      setPools(nextPools);
       setNetworkError(null);
     } catch (e) {
       setNetworkError(e instanceof Error ? e.message : 'The network could not be read.');
@@ -165,6 +184,7 @@ export default function WalletProvider({ children }: { children: React.ReactNode
     setStatus(null);
     setAccount(null);
     setTxs([]);
+    setPools([]);
     // Heights mean other blocks on another network.
     setBlockTimes({});
     setDeliveries(readDeliveries(localStorage));
@@ -265,8 +285,18 @@ export default function WalletProvider({ children }: { children: React.ReactNode
     [core],
   );
 
-  const send = useCallback(
-    async (to: string, amount: bigint): Promise<Sent> => {
+  /**
+   * Signs and submits one transaction. `needs` is what the account must hold
+   * besides the fee, as (asset, base units); `bytes` its encoded size given
+   * whether it carries the key; `sign` makes it.
+   */
+  const transact = useCallback(
+    async (
+      what: Sent['what'],
+      needs: { asset: string; amount: bigint },
+      bytes: (registersKey: boolean) => number,
+      sign: (core: Core, common: Common) => SignedTransfer,
+    ): Promise<Sent> => {
       if (!core || !seed.current || !address) throw new Error('Unlock the wallet first.');
       // Read the chain afresh: the nonce and height must be current.
       const [nowStatus, nowAccount] = await Promise.all([
@@ -278,34 +308,75 @@ export default function WalletProvider({ children }: { children: React.ReactNode
       }
       const registerKey = !nowAccount.key_registered;
       const minFeePerByte = BigInt(nowStatus.min_fee_per_byte);
-      if (BigInt(nowAccount.balance) < amount + transferFee(minFeePerByte, registerKey)) {
-        throw new Error('The balance does not cover the amount plus the fee.');
+      const fee = minFeePerByte * BigInt(bytes(registerKey));
+      const balance = BigInt(nowAccount.balance);
+      if (needs.asset === STEIN) {
+        if (balance < needs.amount + fee) {
+          throw new Error('The balance does not cover the amount plus the fee.');
+        }
+      } else {
+        const held = BigInt(nowAccount.holdings?.find((h) => h.asset === needs.asset)?.balance ?? '0');
+        if (held < needs.amount) throw new Error('You do not hold that much of the token.');
+        if (balance < fee) throw new Error('The STEIN balance does not cover the fee.');
       }
-      const tx = core.signTransfer({
+      const tx = sign(core, {
         seed: seed.current,
         chainId: BigInt(nowStatus.chain_id),
         nonce: BigInt(nowAccount.nonce),
         expiresAt: BigInt(nowStatus.height) + BigInt(nowStatus.max_tx_ttl_blocks) / 2n,
         minFeePerByte,
-        to,
-        amount,
         registerKey,
       });
       const sentAt = Date.now();
       await submit(network, tx.raw);
       const sent: Sent = {
+        what,
         id: tx.id,
         size: tx.raw.length,
         fee: tx.fee,
         height: null,
         sentAt,
         tookMs: null,
+        outcome: null,
       };
       setLastSent(sent);
       void refresh();
       return sent;
     },
     [core, address, network, refresh],
+  );
+
+  const send = useCallback(
+    (to: string, amount: bigint) =>
+      transact(
+        'send',
+        { asset: STEIN, amount },
+        (registersKey) => txBytes({ kind: 'transfer' }, registersKey),
+        (c, common) => c.signTransfer({ ...common, to, amount }),
+      ),
+    [transact],
+  );
+
+  const sendToken = useCallback(
+    (token: string, to: string, amount: bigint) =>
+      transact(
+        'send',
+        { asset: token, amount },
+        (registersKey) => txBytes({ kind: 'transfer_token' }, registersKey),
+        (c, common) => c.signTokenTransfer({ ...common, token, to, amount }),
+      ),
+    [transact],
+  );
+
+  const swap = useCallback(
+    (assetIn: string, amountIn: bigint, assetOut: string, minOut: bigint) =>
+      transact(
+        'swap',
+        { asset: assetIn, amount: amountIn },
+        (registersKey) => txBytes({ kind: 'swap', assetIn, assetOut }, registersKey),
+        (c, common) => c.signSwap({ ...common, assetIn, amountIn, assetOut, minOut }),
+      ),
+    [transact],
   );
 
   const answer = useCallback(
@@ -328,14 +399,15 @@ export default function WalletProvider({ children }: { children: React.ReactNode
     let stop = false;
     const id = setInterval(async () => {
       try {
-        const height = await getTxHeight(network, lastSent.id);
-        if (stop || height === null) return;
+        const state = await getTxState(network, lastSent.id);
+        if (stop || state === null) return;
+        const { height, outcome } = state;
         // From sending until now, when this wallet first sees it in a block:
         // what the person waited, the trip to the node and back included.
         const tookMs = Date.now() - lastSent.sentAt;
         setDeliveries(recordDelivery(localStorage, lastSent.id, tookMs));
         setLastSent((current) =>
-          current && current.id === lastSent.id ? { ...current, height, tookMs } : current,
+          current && current.id === lastSent.id ? { ...current, height, tookMs, outcome } : current,
         );
         void refresh();
       } catch {
@@ -382,6 +454,7 @@ export default function WalletProvider({ children }: { children: React.ReactNode
       status,
       account,
       txs,
+      pools,
       deliveries,
       blockTimes,
       networkError,
@@ -395,6 +468,8 @@ export default function WalletProvider({ children }: { children: React.ReactNode
       backupText,
       markBackedUp,
       send,
+      sendToken,
+      swap,
       answer,
       lastSent,
     }),
@@ -410,6 +485,7 @@ export default function WalletProvider({ children }: { children: React.ReactNode
       status,
       account,
       txs,
+      pools,
       deliveries,
       blockTimes,
       networkError,
@@ -423,6 +499,8 @@ export default function WalletProvider({ children }: { children: React.ReactNode
       backupText,
       markBackedUp,
       send,
+      sendToken,
+      swap,
       answer,
       lastSent,
     ],

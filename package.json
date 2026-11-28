@@ -11,7 +11,7 @@
     "build": "npm run build:wasm && next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
-    "test": "node --test test/core.test.mjs test/inbox.test.mjs test/time.test.mjs",
+    "test": "node --test test/core.test.mjs test/inbox.test.mjs test/time.test.mjs test/assets.test.mjs test/activity.test.mjs",
     "deploy": "npm run build && npx wrangler deploy"
   },
   "dependencies": {

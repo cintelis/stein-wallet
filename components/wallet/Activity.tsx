@@ -1,18 +1,26 @@
 'use client';
 
-// The account's transactions, newest first, as the node reports them, with
-// when each block was made and, for transfers sent from this browser, how
-// long each took to reach a block.
+// The account's transactions, newest first, as the node reports them:
+// transfers of STEIN and of tokens, and swaps with what the pool paid. Each
+// shows when its block was made and, for those sent from this browser, how
+// long it took to reach a block.
 
 import { useEffect, useState } from 'react';
 
+import { describe } from '@/lib/stein/activity';
 import { formatStein } from '@/lib/stein/amount';
+import { tradable, type AssetChoice } from '@/lib/stein/assets';
 import { ago, formatDuration } from '@/lib/stein/time';
 import { useWallet } from './WalletContext';
 import { short } from './util';
 
 export default function Activity() {
-  const { address, txs, network, deliveries, blockTimes } = useWallet();
+  const { address, account, pools, txs, network, deliveries, blockTimes } = useWallet();
+  // The tokens whose symbol and decimals are known: those held, and those with a pool.
+  const known: AssetChoice[] = [
+    ...(account?.holdings ?? []).map((h) => ({ asset: h.asset, symbol: h.symbol, decimals: h.decimals })),
+    ...tradable(pools),
+  ];
   // "3 min ago" goes stale: read the clock again every half minute.
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -30,19 +38,21 @@ export default function Activity() {
         <ul className="mt-5 space-y-2">
           {txs.map((tx) => {
             const out = tx.sender === address;
-            const self = out && tx.to === address;
-            const other = out ? tx.to : tx.sender;
+            const what = describe(tx, address, known);
             const made = blockTimes[tx.height];
             const took = deliveries[tx.id];
             const row = (
               <>
                 <div className="min-w-0">
                   <div className="text-[15px] font-medium text-slate-100">
-                    {self ? 'Sent to yourself' : out ? 'Sent' : 'Received'}
-                    <span className="ml-2 font-mono text-xs text-slate-500">
-                      {self ? '' : `${out ? 'to' : 'from'} ${short(other)}`}
-                    </span>
+                    {what.title}
+                    {what.other && (
+                      <span className="ml-2 font-mono text-xs text-slate-500">
+                        {what.direction} {short(what.other)}
+                      </span>
+                    )}
                   </div>
+                  {what.note && <div className="mt-0.5 text-xs text-slate-400">{what.note}</div>}
                   <div className="mt-0.5 text-xs tabular-nums text-slate-500">
                     Block {tx.height.toLocaleString('en-US')}
                     {made !== undefined && (
@@ -63,12 +73,17 @@ export default function Activity() {
                 </div>
                 <div
                   className={`shrink-0 text-right text-[15px] font-semibold tabular-nums ${
-                    self ? 'text-slate-400' : out ? 'text-slate-100' : 'text-emerald-400'
+                    what.tone === 'neutral'
+                      ? 'text-slate-400'
+                      : what.tone === 'out'
+                        ? 'text-slate-100'
+                        : 'text-emerald-400'
                   }`}
                 >
-                  {self ? '' : out ? '−' : '+'}
-                  {formatStein(BigInt(tx.amount))}
-                  <span className="ml-1 text-xs font-normal text-slate-500">STEIN</span>
+                  {what.amount}
+                  {what.amount && (
+                    <span className="ml-1 text-xs font-normal text-slate-500">{what.symbol}</span>
+                  )}
                 </div>
               </>
             );

@@ -18,6 +18,30 @@ export interface TransferRequest {
   registerKey: boolean;
 }
 
+/** What every transaction request carries. */
+type Common = Omit<TransferRequest, 'to' | 'amount'>;
+
+export interface TokenTransferRequest extends Common {
+  /** The token's address, in text form. */
+  token: string;
+  /** Recipient address, in text form. */
+  to: string;
+  /** Base units of the token to move. */
+  amount: bigint;
+}
+
+/** STEIN ("stein") or a token's address. */
+export type AssetName = string;
+
+export interface SwapRequest extends Common {
+  assetIn: AssetName;
+  /** Base units paid. */
+  amountIn: bigint;
+  assetOut: AssetName;
+  /** Least to accept; otherwise the pool returns what was paid. */
+  minOut: bigint;
+}
+
 export interface SignedTransfer {
   /** Transaction id, hex. */
   id: string;
@@ -48,6 +72,10 @@ export interface Core {
   /** Parses an address, checking its checksum. Throws with a readable message. */
   decodeAddress(text: string): Uint8Array;
   signTransfer(request: TransferRequest): SignedTransfer;
+  /** Signs a transfer of a token, or of a pool's shares. */
+  signTokenTransfer(request: TokenTransferRequest): SignedTransfer;
+  /** Signs a swap through the pool of two assets. */
+  signSwap(request: SwapRequest): SignedTransfer;
   /** Signs a statement: proof to a site, never a transaction. */
   signStatement(statement: Statement): SignedStatement;
   verifyStatement(signed: {
@@ -60,6 +88,8 @@ export interface Core {
   addressFromPublicKey(publicKey: Uint8Array): string;
 }
 
+/** How STEIN is named where an asset is asked for. */
+export const STEIN: 'stein';
 export const PUBLIC_KEY_LEN: number;
 export const SIGNATURE_LEN: number;
 
