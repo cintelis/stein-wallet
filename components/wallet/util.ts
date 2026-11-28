@@ -37,9 +37,9 @@ export const ui = {
   bigInput:
     'w-full min-w-0 bg-transparent text-[26px] font-semibold leading-tight tabular-nums text-slate-50 placeholder:text-slate-700 focus:outline-none disabled:opacity-60',
   input:
-    'w-full rounded-lg border border-slate-800 bg-slate-950/70 px-3 py-2.5 text-sm text-slate-100 placeholder:text-slate-600 focus:border-blue-500/70 focus:outline-none disabled:opacity-60',
+    'w-full rounded-lg border border-slate-800 bg-slate-950/70 px-3 py-2.5 text-base text-slate-100 placeholder:text-slate-600 sm:text-sm focus:border-blue-500/70 focus:outline-none disabled:opacity-60',
   select:
-    'max-w-full cursor-pointer rounded-lg border border-slate-800 bg-slate-900 px-2 py-1.5 text-sm font-semibold text-slate-100 focus:border-blue-500/60 focus:outline-none disabled:opacity-50',
+    'max-w-full cursor-pointer rounded-lg border border-slate-800 bg-slate-900 px-2 py-1.5 text-base font-semibold text-slate-100 focus:border-blue-500/60 sm:text-sm focus:outline-none disabled:opacity-50',
   primary:
     'w-full rounded-xl bg-blue-500 px-4 py-3.5 text-[15px] font-semibold text-white transition hover:bg-blue-400 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-blue-500',
   ghost:
