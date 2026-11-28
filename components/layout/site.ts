@@ -1,5 +1,5 @@
 export const EXPLORER_URL = 'https://steinscan.io';
-export const GITHUB_URL = 'https://github.com/cintelis/stein-chain';
+export const GITHUB_URL = 'https://github.com/steinchain/stein-chain';
 /** Where the messages sent to this account on steinchain.com are read. */
 export const INBOX_URL = `${process.env.NEXT_PUBLIC_SITE_ORIGIN ?? 'https://steinchain.com'}/mailbox`;
 

@@ -1,6 +1,6 @@
 # steinwallet
 
-A browser wallet for [Stein Chain](https://github.com/cintelis/stein-chain),
+A browser wallet for [Stein Chain](https://github.com/steinchain/stein-chain),
 the post-quantum layer-1. Create or import an account, see its balance and
 activity, and send STEIN. Transfers are signed in the browser with FN-DSA-512
 (draft FIPS 206), the default scheme for Stein account keys.
