@@ -1,13 +1,24 @@
 'use client';
 
-// The account's transactions, newest first, as the node reports them.
+// The account's transactions, newest first, as the node reports them, with
+// when each block was made and, for transfers sent from this browser, how
+// long each took to reach a block.
+
+import { useEffect, useState } from 'react';
 
 import { formatStein } from '@/lib/stein/amount';
+import { ago, formatDuration } from '@/lib/stein/time';
 import { useWallet } from './WalletContext';
 import { short } from './util';
 
 export default function Activity() {
-  const { address, txs, network } = useWallet();
+  const { address, txs, network, deliveries, blockTimes } = useWallet();
+  // "3 min ago" goes stale: read the clock again every half minute.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(id);
+  }, []);
   if (!address) return null;
 
   return (
@@ -21,6 +32,8 @@ export default function Activity() {
             const out = tx.sender === address;
             const self = out && tx.to === address;
             const other = out ? tx.to : tx.sender;
+            const made = blockTimes[tx.height];
+            const took = deliveries[tx.id];
             const row = (
               <>
                 <div className="min-w-0">
@@ -31,10 +44,22 @@ export default function Activity() {
                     </span>
                   </div>
                   <div className="mt-0.5 text-xs tabular-nums text-slate-500">
-                    Block {tx.height.toLocaleString('en-US')} · {tx.size.toLocaleString('en-US')}{' '}
-                    bytes · {tx.scheme}
+                    Block {tx.height.toLocaleString('en-US')}
+                    {made !== undefined && (
+                      <span title={new Date(made).toLocaleString()}> · {ago(made, now)}</span>
+                    )}
+                    {' · '}
+                    {tx.size.toLocaleString('en-US')} bytes · {tx.scheme}
                     {out && ` · fee ${formatStein(BigInt(tx.fee))}`}
                   </div>
+                  {took !== undefined && (
+                    <div
+                      className="mt-0.5 text-xs tabular-nums text-emerald-400/90"
+                      title="From sending until this wallet saw it in a block"
+                    >
+                      Delivered in {formatDuration(took)}
+                    </div>
+                  )}
                 </div>
                 <div
                   className={`shrink-0 text-right text-[15px] font-semibold tabular-nums ${

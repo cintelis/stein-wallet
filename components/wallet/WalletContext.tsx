@@ -33,6 +33,7 @@ import {
 import {
   getAccount,
   getAccountTxs,
+  getBlockTime,
   getStatus,
   getTxHeight,
   NETWORKS,
@@ -43,6 +44,7 @@ import {
   type TxView,
 } from '@/lib/stein/rpc';
 import { statementFor, type Answer, type SignRequest } from '@/lib/stein/statement';
+import { readDeliveries, recordDelivery, type Deliveries } from '@/lib/stein/time';
 
 const NETWORK_KEY = 'stein-wallet:network';
 const POLL_MS = 8_000;
@@ -53,6 +55,10 @@ export interface Sent {
   fee: bigint;
   /** Height of the block that included it, once known. */
   height: number | null;
+  /** When it was sent, by this device's clock. */
+  sentAt: number;
+  /** Milliseconds from sending until this wallet saw it in a block, once known. */
+  tookMs: number | null;
 }
 
 interface WalletState {
@@ -70,6 +76,10 @@ interface WalletState {
   status: Status | null;
   account: Account | null;
   txs: TxView[];
+  /** For transfers sent from this browser: milliseconds from sending to being seen in a block. */
+  deliveries: Deliveries;
+  /** When each block in the activity list was made, by height. */
+  blockTimes: Record<number, number>;
   /** Why the network could not be read, if it could not. */
   networkError: string | null;
   refresh: () => Promise<void>;
@@ -113,6 +123,8 @@ export default function WalletProvider({ children }: { children: React.ReactNode
   const [status, setStatus] = useState<Status | null>(null);
   const [account, setAccount] = useState<Account | null>(null);
   const [txs, setTxs] = useState<TxView[]>([]);
+  const [deliveries, setDeliveries] = useState<Deliveries>({});
+  const [blockTimes, setBlockTimes] = useState<Record<number, number>>({});
   const [networkError, setNetworkError] = useState<string | null>(null);
   const [lastSent, setLastSent] = useState<Sent | null>(null);
 
@@ -153,6 +165,9 @@ export default function WalletProvider({ children }: { children: React.ReactNode
     setStatus(null);
     setAccount(null);
     setTxs([]);
+    // Heights mean other blocks on another network.
+    setBlockTimes({});
+    setDeliveries(readDeliveries(localStorage));
     void refresh();
     const id = setInterval(() => {
       if (document.visibilityState === 'visible') void refresh();
@@ -276,8 +291,16 @@ export default function WalletProvider({ children }: { children: React.ReactNode
         amount,
         registerKey,
       });
+      const sentAt = Date.now();
       await submit(network, tx.raw);
-      const sent: Sent = { id: tx.id, size: tx.raw.length, fee: tx.fee, height: null };
+      const sent: Sent = {
+        id: tx.id,
+        size: tx.raw.length,
+        fee: tx.fee,
+        height: null,
+        sentAt,
+        tookMs: null,
+      };
       setLastSent(sent);
       void refresh();
       return sent;
@@ -307,19 +330,45 @@ export default function WalletProvider({ children }: { children: React.ReactNode
       try {
         const height = await getTxHeight(network, lastSent.id);
         if (stop || height === null) return;
+        // From sending until now, when this wallet first sees it in a block:
+        // what the person waited, the trip to the node and back included.
+        const tookMs = Date.now() - lastSent.sentAt;
+        setDeliveries(recordDelivery(localStorage, lastSent.id, tookMs));
         setLastSent((current) =>
-          current && current.id === lastSent.id ? { ...current, height } : current,
+          current && current.id === lastSent.id ? { ...current, height, tookMs } : current,
         );
         void refresh();
       } catch {
         // try again on the next tick
       }
-    }, 1_500);
+    }, 500);
     return () => {
       stop = true;
       clearInterval(id);
     };
   }, [lastSent, network, refresh]);
+
+  // When each block in the activity list was made. A block's time never
+  // changes, so each is asked for once.
+  useEffect(() => {
+    const missing = [...new Set(txs.map((tx) => tx.height))].filter((h) => !(h in blockTimes));
+    if (missing.length === 0) return;
+    let stop = false;
+    void (async () => {
+      for (const height of missing.slice(0, 12)) {
+        try {
+          const time = await getBlockTime(network, height);
+          if (stop) return;
+          if (time !== null) setBlockTimes((known) => ({ ...known, [height]: time }));
+        } catch {
+          return; // the node is unreachable: the list shows without times
+        }
+      }
+    })();
+    return () => {
+      stop = true;
+    };
+  }, [txs, network, blockTimes]);
 
   const value = useMemo<WalletState>(
     () => ({
@@ -333,6 +382,8 @@ export default function WalletProvider({ children }: { children: React.ReactNode
       status,
       account,
       txs,
+      deliveries,
+      blockTimes,
       networkError,
       refresh,
       checkAddress,
@@ -359,6 +410,8 @@ export default function WalletProvider({ children }: { children: React.ReactNode
       status,
       account,
       txs,
+      deliveries,
+      blockTimes,
       networkError,
       refresh,
       checkAddress,

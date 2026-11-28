@@ -105,6 +105,20 @@ export async function getTxHeight(network: Network, id: string): Promise<number 
   }
 }
 
+/**
+ * When the block at `height` was made, by its proposer's clock, in
+ * milliseconds since the Unix epoch. `null` if the node has no such block.
+ */
+export async function getBlockTime(network: Network, height: number): Promise<number | null> {
+  try {
+    const block = await request<{ header?: { timestamp_ms?: number } }>(network, `/block/${height}`);
+    return block.header?.timestamp_ms ?? null;
+  } catch (e) {
+    if (e instanceof Rejected) return null;
+    throw e;
+  }
+}
+
 const toHex = (bytes: Uint8Array) =>
   Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
 

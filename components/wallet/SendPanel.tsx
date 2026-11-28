@@ -7,6 +7,7 @@
 
 import { useState } from 'react';
 import { formatStein, parseStein, transferFee, TRANSFER_BYTES } from '@/lib/stein/amount';
+import { formatDuration } from '@/lib/stein/time';
 import { useWallet } from './WalletContext';
 import { readable, ui } from './util';
 
@@ -182,7 +183,9 @@ export default function SendPanel() {
           <div className="font-semibold">
             {lastSent.height === null
               ? 'Sent. Waiting for a block…'
-              : `Included in block ${lastSent.height.toLocaleString('en-US')}`}
+              : `Included in block ${lastSent.height.toLocaleString('en-US')}${
+                  lastSent.tookMs === null ? '' : ` after ${formatDuration(lastSent.tookMs)}`
+                }`}
           </div>
           <div className="mt-1 tabular-nums">
             {lastSent.size.toLocaleString('en-US')} bytes · fee {formatStein(lastSent.fee)} STEIN

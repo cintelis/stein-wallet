@@ -8,7 +8,7 @@ import { ui, useCopied } from './util';
 
 export default function ReceivePanel() {
   const { address, network } = useWallet();
-  const [copied, copy] = useCopied();
+  const [copied, copy, copyFailed] = useCopied();
   if (!address) return null;
 
   return (
@@ -19,12 +19,12 @@ export default function ReceivePanel() {
       </p>
       <div className={ui.side}>
         <div className={ui.label}>Your address</div>
-        <code className="mt-2 block break-all font-mono text-[13px] leading-relaxed text-slate-100">
+        <code className="mt-2 block select-all break-all font-mono text-[13px] leading-relaxed text-slate-100">
           {address}
         </code>
       </div>
       <button type="button" onClick={() => copy(address)} className={ui.primary}>
-        {copied ? 'Copied' : 'Copy address'}
+        {copied ? 'Copied' : copyFailed ? 'Press and hold the address to copy' : 'Copy address'}
       </button>
       {network.explorer && (
         <a

@@ -2,16 +2,56 @@ import { useState } from 'react';
 
 export const short = (a: string) => `${a.slice(0, 8)}…${a.slice(-6)}`;
 
-/** Clipboard write + 1.5s "copied" flag. */
-export function useCopied(): [boolean, (text: string) => void] {
-  const [copied, setCopied] = useState(false);
+/**
+ * Puts `text` on the clipboard, and says whether it got there.
+ *
+ * The old way first: it works at once, inside the tap, in every browser and
+ * in the browsers that apps open links in (Telegram's, for one), where the
+ * newer clipboard API is missing or refuses. The newer API is the second try.
+ */
+async function copyText(text: string): Promise<boolean> {
+  try {
+    const field = document.createElement('textarea');
+    field.value = text;
+    field.readOnly = true;
+    // On the page, but not seen, and not scrolled to.
+    field.style.position = 'fixed';
+    field.style.top = '0';
+    field.style.left = '0';
+    field.style.opacity = '0';
+    document.body.appendChild(field);
+    field.focus({ preventScroll: true });
+    field.select();
+    field.setSelectionRange(0, text.length);
+    const done = document.execCommand('copy');
+    field.remove();
+    if (done) return true;
+  } catch {
+    // Fall through to the newer API.
+  }
+  try {
+    if (!navigator.clipboard) return false;
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Copies to the clipboard, with a "copied" flag for 1.5 s, or a "failed" flag
+ * for 4 s when the browser would not allow it: a button that does nothing
+ * leaves a person guessing.
+ */
+export function useCopied(): [boolean, (text: string) => void, boolean] {
+  const [state, setState] = useState<'idle' | 'copied' | 'failed'>('idle');
   const copy = (text: string) => {
-    void navigator.clipboard?.writeText(text).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
+    void copyText(text).then((done) => {
+      setState(done ? 'copied' : 'failed');
+      setTimeout(() => setState('idle'), done ? 1500 : 4000);
     });
   };
-  return [copied, copy];
+  return [state === 'copied', copy, state === 'failed'];
 }
 
 /** Errors can be long; keep the useful first line. */

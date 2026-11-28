@@ -9,7 +9,7 @@ import { download, short, useCopied } from './util';
 
 export default function WalletControls() {
   const { ready, address, unlocked, lock, forget, backupText, markBackedUp } = useWallet();
-  const [copied, copy] = useCopied();
+  const [copied, copy, copyFailed] = useCopied();
   const [menuOpen, setMenuOpen] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -58,12 +58,12 @@ export default function WalletControls() {
           <div className="font-mono text-[10px] uppercase tracking-widest text-slate-500">
             Your address · {unlocked ? 'unlocked' : 'locked'}
           </div>
-          <code className="mt-2 block break-all rounded-lg border border-slate-800 bg-black/40 px-2.5 py-2 font-mono text-[11px] leading-relaxed text-slate-300">
+          <code className="mt-2 block select-all break-all rounded-lg border border-slate-800 bg-black/40 px-2.5 py-2 font-mono text-[11px] leading-relaxed text-slate-300">
             {address}
           </code>
           <div className="mt-2 flex gap-2">
             <button type="button" onClick={() => copy(address)} className={item}>
-              {copied ? 'Copied' : 'Copy address'}
+              {copied ? 'Copied' : copyFailed ? 'Press and hold the address to copy' : 'Copy address'}
             </button>
             <button
               type="button"
