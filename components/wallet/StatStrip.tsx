@@ -41,11 +41,20 @@ export default function StatStrip() {
         <div className={`${big} ${account?.nonce ? 'text-slate-50' : 'text-slate-600'}`}>
           {address && account ? account.nonce.toLocaleString('en-US') : '—'}
         </div>
-        <div className={small}>
+        {/* An address is a fingerprint of the public key. The chain learns the
+            key itself from the account's first transaction, which carries it. */}
+        <div
+          className={small}
+          title={
+            address && account && !account.key_registered
+              ? 'You can receive STEIN already. Your first transfer carries your public key to the chain, so it is a little larger; later ones are smaller.'
+              : undefined
+          }
+        >
           {address && account
             ? account.key_registered
-              ? 'Public key on chain'
-              : 'Public key not on chain yet'
+              ? 'Key registered on chain'
+              : 'Your first send registers your key'
             : ' '}
         </div>
       </Tile>
